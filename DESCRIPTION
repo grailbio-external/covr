@@ -43,10 +43,10 @@ Imports:
     utils,
     jsonlite,
     rex,
-    httr,
     crayon,
     withr (>= 1.0.2)
 Suggests:
+    httr,
     R6,
     knitr,
     rmarkdown,
