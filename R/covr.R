@@ -313,7 +313,7 @@ package_coverage <- function(path = ".",
                             quiet = quiet))
 
   # add hooks to the package startup
-  add_hooks(pkg$package, tmp_lib,
+  add_hooks(pkg$package, tmp_lib, tmp_lib,
     fix_mcexit = should_enable_parallel_mcexit_fix(pkg))
 
   libs <- env_path(tmp_lib, .libPaths())
@@ -375,7 +375,7 @@ package_coverage <- function(path = ".",
 
   coverage <- filter_non_package_files(coverage)
 
-  # Exclude both RcppExports to avoid reduntant coverage information
+  # Exclude both RcppExports to avoid redundant coverage information
   line_exclusions <- c("src/RcppExports.cpp", "R/RcppExports.R", line_exclusions, parse_covr_ignore())
 
   exclude(coverage,
@@ -505,17 +505,24 @@ run_commands <- function(pkg, lib, commands) {
 # regardless of how the process terminates.
 # @param pkg_name name of the package to add hooks to
 # @param lib the library path to look in
+# @param trace_dir the directory where trace files will be saved; this can be
+#        an \code{expression} expression to evaluate the call at package load
+#        time, e.g. \code{expression(Sys.getenv("COVERAGE_DIR"))}.
 # @param fix_mcexit whether to add the fix for mcparallel:::mcexit
-add_hooks <- function(pkg_name, lib, fix_mcexit = FALSE) {
+add_hooks <- function(pkg_name, lib, trace_dir, fix_mcexit = FALSE) {
+  if (!is.expression(trace_dir)) {
+    trace_dir <- sprintf("\"%s\"", trace_dir)
+  }
+
   load_script <- file.path(lib, pkg_name, "R", pkg_name)
   lines <- readLines(file.path(lib, pkg_name, "R", pkg_name))
   lines <- append(lines,
     c("setHook(packageEvent(pkg, \"onLoad\"), function(...) covr:::trace_environment(ns))",
-      paste0("reg.finalizer(ns, function(...) { covr:::save_trace(\"", lib, "\") }, onexit = TRUE)")),
+      paste0("reg.finalizer(ns, function(...) { covr:::save_trace(", trace_dir, ") }, onexit = TRUE)")),
     length(lines) - 1L)
 
   if (fix_mcexit) {
-    lines <- append(lines, sprintf("covr:::fix_mcexit('%s')", lib))
+    lines <- append(lines, sprintf("covr:::fix_mcexit('%s')", trace_dir))
   }
 
   writeLines(text = lines, con = load_script)
