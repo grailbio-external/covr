@@ -28,8 +28,10 @@ the <- new.env(parent = emptyenv())
 
 the$replacements <- list()
 
-trace_environment <- function(env) {
-  clear_counters()
+trace_environment <- function(env, clear = TRUE) {
+  if (clear) {
+    clear_counters()
+  }
 
   the$replacements <- compact(c(
       replacements_S4(env),
@@ -45,8 +47,24 @@ reset_traces <- function() {
 }
 
 save_trace <- function(directory) {
+  dir.create(directory, showWarnings = FALSE, recursive = TRUE)
   tmp_file <- temp_file("covr_trace_", tmpdir = directory)
   saveRDS(.counters, file = tmp_file)
+}
+
+# Registry of trace directories for which finalizers have been set.
+.trace_dirs <- new.env(parent = emptyenv())
+
+# Save counter values on session exit.
+# Repeated calls with the same trace directory are ignored.
+save_trace_on_exit <- function(trace_dir) {
+  if (exists(trace_dir, where = .trace_dirs)) {
+    return(invisible(NULL))
+  }
+
+  assign(trace_dir, TRUE, envir = .trace_dirs)
+  reg.finalizer(globalenv(), function(...) save_trace(trace_dir), onexit = TRUE)
+  invisible(NULL)
 }
 
 #' Calculate test coverage for a specific function.
@@ -509,21 +527,33 @@ run_commands <- function(pkg, lib, commands) {
 #        an \code{expression} expression to evaluate the call at package load
 #        time, e.g. \code{expression(Sys.getenv("COVERAGE_DIR"))}.
 # @param fix_mcexit whether to add the fix for mcparallel:::mcexit
-add_hooks <- function(pkg_name, lib, trace_dir, fix_mcexit = FALSE) {
+# @param session_trace whether this hook will be used as part of a larger
+#        session trace. If true, will not clear existing counters when loading
+#        the package, and will ensure that trace is saved once on session exit
+#        instead of every package unload.
+add_hooks <- function(pkg_name, lib, trace_dir, fix_mcexit = FALSE, session_trace = FALSE) {
   if (!is.expression(trace_dir)) {
     trace_dir <- sprintf("\"%s\"", trace_dir)
   }
 
   load_script <- file.path(lib, pkg_name, "R", pkg_name)
-  lines <- readLines(file.path(lib, pkg_name, "R", pkg_name))
-  lines <- append(lines,
-    c("setHook(packageEvent(pkg, \"onLoad\"), function(...) covr:::trace_environment(ns))",
-      paste0("dir.create(", trace_dir, ", showWarnings = FALSE, recursive = TRUE)"),
-      paste0("reg.finalizer(ns, function(...) { covr:::save_trace(", trace_dir, ") }, onexit = TRUE)")),
-    length(lines) - 1L)
+  lines <- readLines(load_script)
+
+  clear_counters <- !session_trace
+  hook_lines <-
+    paste0("setHook(packageEvent(pkg, \"onLoad\"), function(...) covr:::trace_environment(ns, ", clear_counters, "))")
+  if (!session_trace) {
+    hook_lines <- c(hook_lines,
+      paste0("reg.finalizer(ns, function(...) { covr:::save_trace(", trace_dir, ") }, onexit = TRUE)"))
+  }
+  lines <- append(lines, hook_lines, length(lines) - 1L)
+
+  if (session_trace) {
+    lines <- append(lines, paste0("covr:::save_trace_on_exit(", trace_dir, ")"))
+  }
 
   if (fix_mcexit) {
-    lines <- append(lines, sprintf("covr:::fix_mcexit('%s')", trace_dir))
+    lines <- append(lines, paste0("covr:::fix_mcexit(", trace_dir, ")"))
   }
 
   writeLines(text = lines, con = load_script)
