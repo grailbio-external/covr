@@ -518,6 +518,7 @@ add_hooks <- function(pkg_name, lib, trace_dir, fix_mcexit = FALSE) {
   lines <- readLines(file.path(lib, pkg_name, "R", pkg_name))
   lines <- append(lines,
     c("setHook(packageEvent(pkg, \"onLoad\"), function(...) covr:::trace_environment(ns))",
+      paste0("dir.create(", trace_dir, ", showWarnings = FALSE, recursive = TRUE)"),
       paste0("reg.finalizer(ns, function(...) { covr:::save_trace(", trace_dir, ") }, onexit = TRUE)")),
     length(lines) - 1L)
 
